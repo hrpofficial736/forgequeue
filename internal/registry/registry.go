@@ -1,12 +1,16 @@
 package registry
 
-import "fmt"
+import (
+	"fmt"
 
-var jobsMappings = make(map[string]func(...any))
+	"github.com/hrpofficial736/forgequeue/internal/models"
+)
+
+var jobsMappings *map[string]*models.JobPayload = &map[string]*models.JobPayload{}
 
 type JobsRegistryInterface interface {
-	GetJob(string) func(...any)
-	CreateJob(string, func(...any)) error
+	GetJob(string) (*models.JobPayload, error)
+	CreateJob(string, *models.JobPayload) error
 	DeleteJob(string) error
 }
 
@@ -16,29 +20,29 @@ func NewJobsRegistryInterface() JobsRegistryInterface {
 
 type jobRegistry struct{}
 
-func (j *jobRegistry) GetJob(hash string) func(...any) {
-	if job, exists := jobsMappings[hash]; exists {
-		return job
+func (j *jobRegistry) GetJob(hash string) (*models.JobPayload, error) {
+	if job, exists := (*jobsMappings)[hash]; exists {
+		return job, nil
 	}
 
-	return nil
+	return &models.JobPayload{}, fmt.Errorf("no function found for the given job ID")
 }
 
-func (j *jobRegistry) CreateJob(hash string, job func(...any)) error {
-	if _, exists := jobsMappings[hash]; exists {
+func (j *jobRegistry) CreateJob(hash string, job *models.JobPayload) error {
+	if _, exists := (*jobsMappings)[hash]; exists {
 		return fmt.Errorf("job already exists")
 	}
 
-	jobsMappings[hash] = job
+	(*jobsMappings)[hash] = job
 	return nil
 }
 
 func (j *jobRegistry) DeleteJob(hash string) error {
-	if _, exists := jobsMappings[hash]; !exists {
+	if _, exists := (*jobsMappings)[hash]; !exists {
 		return fmt.Errorf("job not found")
 	}
 
-	delete(jobsMappings, hash)
+	delete((*jobsMappings), hash)
 
 	return nil
 }

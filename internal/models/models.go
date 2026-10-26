@@ -2,28 +2,50 @@ package models
 
 import "time"
 
-type JobStatus string
+type JobPayload struct {
+	Name    string
+	Payload map[string]interface{}
+	Handler func(map[string]interface{})
+}
+
+type JobStatus int
 
 const (
-	READY     JobStatus = "READY"
-	ACTIVE    JobStatus = "ACTIVE"
-	SUCCEEDED JobStatus = "SUCCEEDED"
-	FAILED    JobStatus = "FAILED"
-	DELAYED   JobStatus = "DELAYED"
+	READY JobStatus = iota
+	ACTIVE
+	SUCCEEDED
+	FAILED
+	DELAYED
+	SCHEDULED
 )
 
 type Job struct {
-	ID           string
-	Name         string
-	HandlerName  string
-	QueueName    string
-	Payload      any
-	Status       JobStatus
-	LeaseOwner   string
-	LeaseExpiry  time.Time
-	Priority     int
-	RetriesCount int
-	MaxRetries   int
-	Queue        string
-	CreatedAt    time.Time
+	ID           string    `redis:"id"`
+	Name         string    `redis:"name"`
+	QueueName    string    `redis:"queueName"`
+	Status       JobStatus `redis:"status"`
+	LeaseOwner   string    `redis:"leaseOwner"`
+	LeaseExpiry  time.Time `redis:"leaseExpiry"`
+	Priority     int       `redis:"priority"`
+	RetriesCount int       `redis:"retriesCount"`
+	MaxRetries   int       `redis:"maxRetries"`
+
+	// if job is DELAYED
+	After time.Duration `redis:"after"`
+
+	// if job is SCHEDULED
+	At time.Time `redis:"at"`
+
+	CreatedAt time.Time `redis:"createdAt"`
+}
+
+type JobConfiguration struct {
+	DefaultPriority   int
+	DefaultMaxRetries int
+}
+
+type Worker struct {
+	ID                string        `redis:"id"`
+	HeartbeatInterval time.Duration `redis:"heartBeatInterval"`
+	CurrentJobID      string        `redis:"currentJobId"`
 }

@@ -2,13 +2,14 @@ package recoverer
 
 import (
 	"context"
-	"time"
-
+	"encoding/json"
+	"github.com/hrpofficial736/forgequeue/internal/models"
 	"github.com/hrpofficial736/forgequeue/internal/storage/redis"
+	"time"
 )
 
 type RecovererInterface interface {
-	RecoverJobs(context.Context) error
+	StartRecoverer(context.Context) error
 }
 
 type recoverer struct {
@@ -19,34 +20,43 @@ func NewRecovererInterface(ri redis.RedisInterface) RecovererInterface {
 	return &recoverer{ri}
 }
 
-func (r *recoverer) RecoverJobs(ctx context.Context) error {
+func (r *recoverer) StartRecoverer(ctx context.Context) error {
 	// calculating the current time
 	currTime := time.Now().UnixMilli()
 
 	// getting all jobs that have expired lease(currTime == lease time)
-	jobs, err := r.ri.GetMembersWithASpecificScore(
+	jobs, err := r.ri.GetARangeOfMembers(
 		ctx,
 		"ACTIVE",
-		float64(currTime),
 		0,
-		float64(currTime),
+		currTime,
 	)
 
 	if err != nil {
 		return err
 	}
 
-	// removing all those jobs from ACTIVE queue
-	for _, job := range jobs {
-		err := r.ri.RemoveASpecificMemberFromSortedSet(ctx, "ACTIVE", job)
+	for _, jobAsString := range jobs {
+		var job models.Job
+
+		if err := json.Unmarshal([]byte(jobAsString), &job); err != nil {
+			return err
+		}
+
+		// removing all those jobs from ACTIVE queue
+		err := r.ri.RemoveASpecificMemberFromSortedSet(ctx, "ACTIVE", job.ID)
 		if err != nil {
 			return err
 		}
-	}
 
-	// pushing jobs back to READY queue
-	for _, job := range jobs {
-		err := r.ri.AddToSortedSet(ctx, "READY", float64(currTime), job)
+		jobInBytes, err := json.Marshal(job)
+
+		if err != nil {
+			return err
+		}
+
+		// pushing jobs back to READY queue
+		err = r.ri.AddMemberToSortedSet(ctx, "READY", float64(currTime), string(jobInBytes))
 		if err != nil {
 			return err
 		}

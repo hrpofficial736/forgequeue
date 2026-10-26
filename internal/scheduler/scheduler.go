@@ -2,15 +2,14 @@ package scheduler
 
 import (
 	"context"
-	"time"
-
 	"github.com/hrpofficial736/forgequeue/internal/storage/redis"
+	"time"
 )
 
 type SchedulerInterface interface {
 	scheduleCronJobs(ctx context.Context) error
 	scheduleDelayedJobs(ctx context.Context) error
-	ScheduleJobs(ctx context.Context)
+	StartScheduler(ctx context.Context)
 }
 
 type scheduler struct {
@@ -24,12 +23,11 @@ func NewSchedulerInterface(ri redis.RedisInterface) SchedulerInterface {
 func (s *scheduler) scheduleCronJobs(ctx context.Context) error {
 	// taking jobs out of the SCHEDULES queue
 	currTime := time.Now().UnixMilli()
-	cronJobs, err := s.ri.GetMembersWithASpecificScore(
+	cronJobs, err := s.ri.GetARangeOfMembers(
 		ctx,
 		"SCHEDULES",
-		float64(currTime),
-		float64(currTime),
-		float64(currTime),
+		currTime,
+		currTime,
 	)
 
 	if err != nil {
@@ -37,7 +35,7 @@ func (s *scheduler) scheduleCronJobs(ctx context.Context) error {
 	}
 
 	for _, job := range cronJobs {
-		err := s.ri.AddToSortedSet(ctx, "READY", float64(currTime), job)
+		err := s.ri.AddMemberToSortedSet(ctx, "READY", float64(currTime), job)
 		if err != nil {
 			return err
 		}
@@ -50,12 +48,11 @@ func (s *scheduler) scheduleDelayedJobs(ctx context.Context) error {
 	// taking jobs out of the DELAYED queue
 
 	currTime := time.Now().UnixMilli()
-	delayedJobs, err := s.ri.GetMembersWithASpecificScore(
+	delayedJobs, err := s.ri.GetARangeOfMembers(
 		ctx,
 		"DELAYED",
-		float64(currTime),
-		0,
-		float64(currTime),
+		currTime,
+		currTime,
 	)
 
 	if err != nil {
@@ -63,7 +60,7 @@ func (s *scheduler) scheduleDelayedJobs(ctx context.Context) error {
 	}
 
 	for _, job := range delayedJobs {
-		err := s.ri.AddToSortedSet(ctx, "READY", float64(currTime), job)
+		err := s.ri.AddMemberToSortedSet(ctx, "READY", float64(currTime), job)
 		if err != nil {
 			return err
 		}
@@ -72,7 +69,7 @@ func (s *scheduler) scheduleDelayedJobs(ctx context.Context) error {
 	return nil
 }
 
-func (s *scheduler) ScheduleJobs(ctx context.Context) {
+func (s *scheduler) StartScheduler(ctx context.Context) {
 	for {
 		go s.scheduleCronJobs(ctx)
 		go s.scheduleDelayedJobs(ctx)

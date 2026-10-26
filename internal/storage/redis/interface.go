@@ -10,15 +10,19 @@ import (
 
 type RedisInterface interface {
 	// sorted set functions
-	DestroySortedSet(context.Context, string) error
-	AddToSortedSet(context.Context, string, float64, any) error
-	GetMembersWithASpecificScore(context.Context, string, float64, float64, float64) ([]string, error)
+	DeleteSortedSet(context.Context, string) error
+	AddMemberToSortedSet(context.Context, string, float64, string) error
+	GetARangeOfMembers(context.Context, string, int64, int64) ([]string, error)
 	GetAndRemoveNextMemberFromSortedSet(context.Context, string) (string, error)
 	RemoveASpecificMemberFromSortedSet(context.Context, string, string) error
 
+	// set functions
+	GetValue(context.Context, string) (string, error)
+	SetKeyValue(context.Context, string, any, time.Duration) error
+
 	// hash functions
-	CreateHash(context.Context, string, any, time.Duration) error
-	GetHashValue(context.Context, string) (*redis.MapStringStringCmd, error)
+	CreateHash(context.Context, string, any) error
+	GetHashValue(context.Context, string) (map[string]string, error)
 }
 
 type redisStruct struct {
@@ -31,7 +35,7 @@ func NewRedisInterface(client *redis.Client) RedisInterface {
 	}
 }
 
-func (r *redisStruct) DestroySortedSet(ctx context.Context, sortedSetName string) error {
+func (r *redisStruct) DeleteSortedSet(ctx context.Context, sortedSetName string) error {
 	err := r.client.Del(ctx, sortedSetName).Err()
 
 	if err != nil {
@@ -41,42 +45,41 @@ func (r *redisStruct) DestroySortedSet(ctx context.Context, sortedSetName string
 	return nil
 }
 
-func (r *redisStruct) AddToSortedSet(
+func (r *redisStruct) AddMemberToSortedSet(
 	ctx context.Context,
 	sortedSetName string,
 	score float64,
-	data any,
+	data string,
 ) error {
 	err := r.client.ZAdd(ctx, sortedSetName, redis.Z{Score: score, Member: data}).Err()
 	if err != nil {
 		return err
 	}
-	return nil
+	return err
 }
 
-func(r *redisStruct) GetMembersWithASpecificScore(
+func (r *redisStruct) GetARangeOfMembers(
 	ctx context.Context,
 	sortedSetName string,
-	score float64,
-	start float64,
-	end float64,
+	start,
+	end int64,
 ) ([]string, error) {
-	list, err := r.client.ZRangeArgs(ctx, redis.ZRangeArgs{
-		Key: sortedSetName,
-		Start: score,
-		Stop: score,
-		ByScore: true,
-		Offset: 0,
-		Count: -1,
-	}).Result()
-
+	result, err := r.client.ZRangeArgs(
+		ctx,
+		redis.ZRangeArgs{
+			Key:     sortedSetName,
+			Start:   start,
+			Stop:    end,
+			ByScore: true,
+			Offset:  0,
+		},
+	).Result()
 	if err != nil {
 		return nil, err
 	}
 
-	return list, nil
+	return result, nil
 }
-
 
 func (r *redisStruct) GetAndRemoveNextMemberFromSortedSet(
 	ctx context.Context,
@@ -85,7 +88,7 @@ func (r *redisStruct) GetAndRemoveNextMemberFromSortedSet(
 
 	d, err := r.client.ZPopMax(ctx, sortedSetName, 1).Result()
 
-	if err != nil {
+	if err != nil || len(d) == 0 {
 		return "", err
 	}
 
@@ -97,10 +100,36 @@ func (r *redisStruct) RemoveASpecificMemberFromSortedSet(
 	sortedSetName,
 	member string,
 ) error {
-	err := r.client.ZRem(ctx, sortedSetName).Err()
+	err := r.client.ZRem(ctx, sortedSetName, member).Err()
 	if err != nil {
 		return err
 	}
+
+	return nil
+}
+
+func (r *redisStruct) GetValue(
+	ctx context.Context,
+	key string,
+) (string, error) {
+	result, err := r.client.Get(ctx, key).Result()
+	if err != nil {
+		return "", err
+	}
+	return result, nil
+}
+
+func (r *redisStruct) SetKeyValue(
+	ctx context.Context,
+	key string,
+	value any,
+	expirationTime time.Duration,
+) error {
+	err := r.client.Set(ctx, key, value, expirationTime).Err()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -108,14 +137,8 @@ func (r *redisStruct) CreateHash(
 	ctx context.Context,
 	hash string,
 	data any,
-	expiration time.Duration,
 ) error {
 	err := r.client.HSet(ctx, hash, data).Err()
-	if err != nil {
-		return err
-	}
-
-	err = r.client.Expire(ctx, hash, expiration).Err()
 	if err != nil {
 		return err
 	}
@@ -123,12 +146,16 @@ func (r *redisStruct) CreateHash(
 	return nil
 }
 
-func (r *redisStruct) GetHashValue(ctx context.Context, hash string) (*redis.MapStringStringCmd, error) {
-	result := r.client.HGetAll(ctx, hash)
+func (r *redisStruct) GetHashValue(ctx context.Context, hash string) (map[string]string, error) {
+	result, err := r.client.HGetAll(ctx, hash).Result()
 
-	if result.Err() != nil {
-		fmt.Println(fmt.Errorf("error occured: %s", result.Err()))
-		return nil, result.Err()
+	if err != nil {
+		fmt.Println(fmt.Errorf("error occured: %s", err))
+		return nil, err
+	}
+
+	if len(result) == 0 {
+		return nil, fmt.Errorf("hash not found!")
 	}
 
 	return result, nil
